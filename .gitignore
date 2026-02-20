@@ -1,0 +1,16 @@
+# Ambiente virtual
+.venv/
+
+# Arquivos Python
+__pycache__/
+*.pyc
+
+# Arquivos gerados
+*.csv
+*.xlsx
+
+# VSCode
+.vscode/
+
+# Sistema
+.DS_Store
