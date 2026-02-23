@@ -3,23 +3,28 @@ import re
 import numpy as np
 
 # Caminho do seu arquivo
+
 caminho = r'C:\Users\user\OneDrive\Área de Trabalho\João Pedro\Python\MTBF_MTTR\report_2026.xlsx'
-
-# Carrega todas as abas de uma vez
-todas_abas = pd.read_excel(caminho, sheet_name=None,skiprows=1)
-
-lista_dfs = []
-
-for aba in todas_abas:
-
-    df = todas_abas[aba]
-    df['data'] = aba
-    lista_dfs.append(df)
+caminho2 = r'C:\Users\user\OneDrive\Área de Trabalho\João Pedro\Python\MTBF_MTTR\report_2025.xlsx'
 
 
+caminhos = [caminho, caminho2]
 
-df_completo = pd.concat(lista_dfs)
-#print(df_completo)
+todos_os_dados = []
+
+for arquivo in caminhos:
+
+    print(f"Lendo arquivo: {arquivo}")
+    # Carrega todas as abas do arquivo atual
+    todas_abas = pd.read_excel(arquivo, sheet_name=None, skiprows=1)
+
+    for aba in todas_abas:
+
+        df = todas_abas[aba]
+        df['data'] = aba
+        todos_os_dados.append(df)
+
+    df_completo = pd.concat(todos_os_dados)
 
 # Renomeando as colunas
 
@@ -58,8 +63,8 @@ df_sensores = df_sensores.melt(
 
 df_sensores['downtime'] = df_sensores['%_falha'] * 1440
 df_sensores['uptime'] = 1440 - df_sensores['downtime']
-df_sensores['n_falhas'] = np.where(df_sensores['%_falha'] > 0, 1, 0)
-
+df_sensores['n_falhas'] = np.where(df_sensores['%_falha'] > 0.5,1, 0)
+#df_sensores['n_falhas'] = np.where(df_sensores['%_falha'] == 1, df_sensores['%_falha'], 0)
 # Dropando colunas originais
 df_sensores.drop(columns='%_falha', inplace=True)
 
@@ -73,7 +78,7 @@ df_sensores['data'] = df_sensores['data'].dt.strftime('%d/%m/%Y')
 df_sensores_mensal = df_sensores.copy()
 
 df_sensores_mensal = df_sensores.groupby(
-    ['corredor', 'barragem', 'equipamento', 'mes_ano']
+    ['corredor', 'barragem', 'equipamento']
 ).agg({
     'data': 'count',
     'downtime': 'sum',
@@ -94,7 +99,7 @@ df_sensores_mensal['mttr'] = np.where(
     df_sensores_mensal['downtime'] / df_sensores_mensal['n_falhas'],
     0 # Se não falhou, o tempo de reparo é zero
 )
-'''
+
 # Exportando o DataFrame consolidado mensal
 df_sensores_mensal.to_csv('relatorio_sensores_mensal.csv',
                           sep=',',
@@ -102,7 +107,61 @@ df_sensores_mensal.to_csv('relatorio_sensores_mensal.csv',
                           encoding='utf-8-sig')
 
 print("Arquivo exportado com sucesso!")
-'''
+
+# Calculando o consumo médio, estoque de segurança e ponto de reposição por corredor
+
+df_sensores_reposicao_corredor = df_sensores_mensal.copy()
+
+df_sensores_reposicao_corredor['tipo'] = df_sensores_reposicao_corredor.apply(lambda x: 'gateway' if x['equipamento'] == 'gateway' else 'sensor', axis=1)
+
+# Se n_falhas for 0, o consumo é 0.
+# Caso contrário, aplica a lógica: MTBF <= 0 vira 1/30, e MTBF > 0 calcula 1440/x com teto de 1. - na verdade limitei a 1/30 pq quando varia mt 1 troca deve resovler
+df_sensores_reposicao_corredor['consumo_diario'] = df_sensores_reposicao_corredor.apply(
+    lambda x: 0 if x['n_falhas'] == 0 else (
+        1/x['data'] if x['mtbf'] <= 0 else (1/x['data'] if 1440/x['mtbf'] > 1/x['data'] else 1440/x['mtbf'])
+    ), axis=1
+)
+
+df_sensores_reposicao_corredor.drop(columns=['downtime','uptime','n_falhas','mtbf','mttr'], inplace=True)
+
+df_sensores_reposicao_corredor['consumo_mensal'] = df_sensores_reposicao_corredor['consumo_diario'] * df_sensores_reposicao_corredor['data']
+
+
+# Primeiro vou agrupar cada sensor pra ficar uma analise apenas "mensal"
+# df de reposicao por barragem caso queira consultar
+
+df_sensores_reposicao_corredor = df_sensores_reposicao_corredor.groupby(
+    ['corredor', 'barragem', 'equipamento']
+).agg({
+    'data': 'sum',
+    'consumo_mensal': 'sum'
+}).reset_index()
+
+df_sensores_reposicao_corredor['consumo_diario'] = df_sensores_reposicao_corredor['consumo_mensal']/df_sensores_reposicao_corredor['data']
+
+df_sensores_reposicao_corredor = df_sensores_reposicao_corredor.groupby(
+    ['corredor']
+).agg({
+    'consumo_diario': 'sum'
+}).reset_index()
+
+LEAD_TIME = 90
+
+df_sensores_reposicao_corredor['estoque_indicado'] = LEAD_TIME * df_sensores_reposicao_corredor['consumo_diario']
+
+print(df_sensores_reposicao_corredor)
+
+print(df_sensores_reposicao_corredor.columns)
+
+
+# df para posicao por corredor
+
+
+
+#print(df_sensores_reposicao_corredor)
+#print(df_sensores_reposicao_corredor.columns)
+
+
 
 # Tratar dados apenas da barragem
 dropar = ['disponibilidade_para_o_cmg', 'falha_comm',
@@ -124,7 +183,7 @@ df_barragem['mes_ano'] = df_barragem['data'].dt.strftime('%m_%Y')
 df_barragem['data'] = df_barragem['data'].dt.strftime('%d/%m/%Y')
 
 df_barragem_mensal = df_barragem.groupby(
-    ['corredor', 'barragem', 'mes_ano']
+    ['corredor', 'barragem','mes_ano']
 ).agg({
     'data': 'count',
     'downtime': 'sum',
@@ -154,7 +213,5 @@ df_barragem_mensal.to_csv('relatorio_barragem_mensal.csv',
 
 print("Arquivo exportado com sucesso!")
 
-print(df_barragem_mensal)
-print(df_barragem_mensal.columns)
 #print(df_compilado.info())
 #print(df_compilado.describe())
