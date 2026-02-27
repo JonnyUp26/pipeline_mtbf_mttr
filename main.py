@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 import numpy as np
+from gerador_graficos import gerar_graficos
 
 # Caminho do seu arquivo
 
@@ -61,10 +62,14 @@ df_sensores = df_sensores.melt(
     value_name='%_falha'
 )
 
+df_sensores['tipo'] = df_sensores.apply(lambda x: 'gateway' if x['equipamento'] == 'gateway' else 'sensor', axis=1)
+
 df_sensores['downtime'] = df_sensores['%_falha'] * 1440
 df_sensores['uptime'] = 1440 - df_sensores['downtime']
 df_sensores['n_falhas'] = np.where(df_sensores['%_falha'] > 0.5,1, 0)
+df_sensores['n_falhas_minimas'] = np.where(df_sensores['%_falha'] > 0.01,1, 0)
 #df_sensores['n_falhas'] = np.where(df_sensores['%_falha'] == 1, df_sensores['%_falha'], 0)
+
 # Dropando colunas originais
 df_sensores.drop(columns='%_falha', inplace=True)
 
@@ -78,12 +83,13 @@ df_sensores['data'] = df_sensores['data'].dt.strftime('%d/%m/%Y')
 df_sensores_mensal = df_sensores.copy()
 
 df_sensores_mensal = df_sensores.groupby(
-    ['corredor', 'barragem', 'equipamento']
+    ['corredor', 'barragem','equipamento']
 ).agg({
     'data': 'count',
     'downtime': 'sum',
     'uptime': 'sum',
-    'n_falhas': 'sum'
+    'n_falhas': 'sum',
+    'n_falhas_minimas': 'sum'
 }).reset_index()
 
 # MTBF: Quanto tempo ele aguenta rodando antes de dar pau
@@ -111,8 +117,6 @@ print("Arquivo exportado com sucesso!")
 # Calculando o consumo médio, estoque de segurança e ponto de reposição por corredor
 
 df_sensores_reposicao_corredor = df_sensores_mensal.copy()
-
-df_sensores_reposicao_corredor['tipo'] = df_sensores_reposicao_corredor.apply(lambda x: 'gateway' if x['equipamento'] == 'gateway' else 'sensor', axis=1)
 
 # Se n_falhas for 0, o consumo é 0.
 # Caso contrário, aplica a lógica: MTBF <= 0 vira 1/30, e MTBF > 0 calcula 1440/x com teto de 1. - na verdade limitei a 1/30 pq quando varia mt 1 troca deve resovler
@@ -215,3 +219,174 @@ print("Arquivo exportado com sucesso!")
 
 #print(df_compilado.info())
 #print(df_compilado.describe())
+
+# --------------------------------------------------
+#                  ANALISE LESLEY 1
+#           Sensores por corredor por Mes
+# --------------------------------------------------
+
+df_sensores_mes_corredor = df_sensores.copy()
+
+df_sensores_mes_corredor = df_sensores.groupby(
+    ['corredor','mes_ano', 'tipo']
+).agg({
+    'data': 'count',
+    'downtime': 'sum',
+    'uptime': 'sum',
+    'n_falhas': 'sum',
+    'n_falhas_minimas': 'sum'
+}).reset_index()
+
+# MTBF: Quanto tempo ele aguenta rodando antes de dar pau
+df_sensores_mes_corredor['mtbf'] = np.where(
+    df_sensores_mes_corredor['n_falhas'] > 0,
+    df_sensores_mes_corredor['uptime'] / df_sensores_mes_corredor['n_falhas'],
+    df_sensores_mes_corredor['uptime'] # Se não falhou, o MTBF é o mês inteiro
+)
+
+# MTTR: Qual a média de tempo que ele fica "fora" por falha
+df_sensores_mes_corredor['mttr'] = np.where(
+    df_sensores_mes_corredor['n_falhas'] > 0,
+    df_sensores_mes_corredor['downtime'] / df_sensores_mes_corredor['n_falhas'],
+    0 # Se não falhou, o tempo de reparo é zero
+)
+
+# Exportando o DataFrame consolidado mensal
+df_sensores_mes_corredor.to_csv('relatorio_sensores_mes_corredor.csv',
+                          sep=',',
+                          index=False,
+                          encoding='utf-8-sig')
+
+print("Arquivo exportado com sucesso!")
+
+# --------------------------------------------------
+#                  ANALISE LESLEY 2
+#           Sensores por Barragem por Mes
+# --------------------------------------------------
+
+df_sensores_mes_barragem = df_sensores.copy()
+
+df_sensores_mes_barragem = df_sensores_mes_barragem.groupby(
+    ['corredor','barragem','mes_ano', 'tipo']
+).agg({
+    'data': 'count',
+    'downtime': 'sum',
+    'uptime': 'sum',
+    'n_falhas': 'sum',
+    'n_falhas_minimas': 'sum'
+}).reset_index()
+
+# MTBF: Quanto tempo ele aguenta rodando antes de dar pau
+df_sensores_mes_barragem['mtbf'] = np.where(
+    df_sensores_mes_barragem['n_falhas'] > 0,
+    df_sensores_mes_barragem['uptime'] / df_sensores_mes_barragem['n_falhas'],
+    df_sensores_mes_barragem['uptime'] # Se não falhou, o MTBF é o mês inteiro
+)
+
+# MTTR: Qual a média de tempo que ele fica "fora" por falha
+df_sensores_mes_barragem['mttr'] = np.where(
+    df_sensores_mes_barragem['n_falhas'] > 0,
+    df_sensores_mes_barragem['downtime'] / df_sensores_mes_barragem['n_falhas'],
+    0 # Se não falhou, o tempo de reparo é zero
+)
+
+# Exportando o DataFrame consolidado mensal
+df_sensores_mes_barragem.to_csv('relatorio_sensores_mes_barragem.csv',
+                          sep=',',
+                          index=False,
+                          encoding='utf-8-sig')
+
+print("Arquivo exportado com sucesso!")
+
+# --------------------------------------------------
+#                  ANALISE LESLEY 3
+#           Sensores por corredor por Ano
+# --------------------------------------------------
+
+df_sensores_ano_corredor = df_sensores.copy()
+
+df_sensores_ano_corredor['ano'] = df_sensores_ano_corredor['mes_ano'].str[-4:]
+
+df_sensores_ano_corredor = df_sensores_ano_corredor.groupby(
+    ['corredor','ano', 'tipo']
+).agg({
+    'data': 'count',
+    'downtime': 'sum',
+    'uptime': 'sum',
+    'n_falhas': 'sum',
+    'n_falhas_minimas': 'sum'
+}).reset_index()
+
+# MTBF: Quanto tempo ele aguenta rodando antes de dar pau
+df_sensores_ano_corredor['mtbf'] = np.where(
+    df_sensores_ano_corredor['n_falhas'] > 0,
+    df_sensores_ano_corredor['uptime'] / df_sensores_ano_corredor['n_falhas'],
+    df_sensores_ano_corredor['uptime'] # Se não falhou, o MTBF é o mês inteiro
+)
+
+# MTTR: Qual a média de tempo que ele fica "fora" por falha
+df_sensores_ano_corredor['mttr'] = np.where(
+    df_sensores_ano_corredor['n_falhas'] > 0,
+    df_sensores_ano_corredor['downtime'] / df_sensores_ano_corredor['n_falhas'],
+    0 # Se não falhou, o tempo de reparo é zero
+)
+
+# Exportando o DataFrame consolidado mensal
+df_sensores_ano_corredor.to_csv('relatorio_sensores_ano_corredor.csv',
+                          sep=',',
+                          index=False,
+                          encoding='utf-8-sig')
+
+print("Arquivo exportado com sucesso!")
+
+# --------------------------------------------------
+#                  ANALISE LESLEY 4
+#           Sensores por Barragem por Ano
+# --------------------------------------------------
+
+df_sensores_ano_barragem = df_sensores.copy()
+
+df_sensores_ano_barragem['ano'] = df_sensores_ano_barragem['mes_ano'].str[-4:]
+
+df_sensores_ano_barragem = df_sensores_ano_barragem.groupby(
+    ['corredor','barragem','ano', 'tipo']
+).agg({
+    'data': 'count',
+    'downtime': 'sum',
+    'uptime': 'sum',
+    'n_falhas': 'sum',
+    'n_falhas_minimas': 'sum'
+}).reset_index()
+
+# MTBF: Quanto tempo ele aguenta rodando antes de dar pau
+df_sensores_ano_barragem['mtbf'] = np.where(
+    df_sensores_ano_barragem['n_falhas'] > 0,
+    df_sensores_ano_barragem['uptime'] / df_sensores_ano_barragem['n_falhas'],
+    df_sensores_ano_barragem['uptime'] # Se não falhou, o MTBF é o mês inteiro
+)
+
+# MTTR: Qual a média de tempo que ele fica "fora" por falha
+df_sensores_ano_barragem['mttr'] = np.where(
+    df_sensores_ano_barragem['n_falhas'] > 0,
+    df_sensores_ano_barragem['downtime'] / df_sensores_ano_barragem['n_falhas'],
+    0 # Se não falhou, o tempo de reparo é zero
+)
+print(df_sensores_ano_barragem)
+# Exportando o DataFrame consolidado mensal
+df_sensores_ano_barragem.to_csv('relatorio_sensores_ano_barragem.csv',
+                          sep=',',
+                          index=False,
+                          encoding='utf-8-sig')
+
+print("Arquivo exportado com sucesso!")
+
+
+dfs = {
+    "df_sensores_mes_corredor": (df_sensores_mes_corredor, "mes_ano"),
+    "df_sensores_mes_barragem": (df_sensores_mes_barragem, "mes_ano"),
+    "df_sensores_ano_corredor": (df_sensores_ano_corredor, "ano"),
+    "df_sensores_ano_barragem": (df_sensores_ano_barragem, "ano"),
+}
+
+for nome_df, (df, coluna_tempo) in dfs.items():
+    gerar_graficos(df, nome_df, coluna_tempo)

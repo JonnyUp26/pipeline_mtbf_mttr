@@ -7,6 +7,7 @@ __pycache__/
 
 # Arquivos gerados
 *.csv
+*.png
 *.xlsx
 
 # VSCode
